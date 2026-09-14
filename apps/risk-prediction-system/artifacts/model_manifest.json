@@ -24,8 +24,7 @@
       "sha256": "4d1e021d7f178518b8b5470af2a81f8fa3abadb246cc13ab4e8d928fba8e0cd9",
       "objective": "binary:logistic",
       "feature_count": 22927,
-      "boosted_rounds": 300,
-      "delivery_validation_auroc": 0.9251573870613485
+      "boosted_rounds": 300
     },
     {
       "target": "Label_1y",
@@ -34,8 +33,7 @@
       "sha256": "f6e82be2fa0e7ad61ca1eda9165cfb363171918b089877fb1a90f974f9fe0b4f",
       "objective": "binary:logistic",
       "feature_count": 22927,
-      "boosted_rounds": 300,
-      "delivery_validation_auroc": 0.8183464615663243
+      "boosted_rounds": 300
     },
     {
       "target": "Label_5y",
@@ -44,8 +42,7 @@
       "sha256": "bf0fb72844975a4b802fcabdb2c0e2db01ebe4077b393708a8c03711d9342863",
       "objective": "binary:logistic",
       "feature_count": 22927,
-      "boosted_rounds": 300,
-      "delivery_validation_auroc": 0.7804409429007249
+      "boosted_rounds": 300
     }
   ]
 }

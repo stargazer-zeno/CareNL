@@ -12,6 +12,6 @@ artifacts/
     └── xgb_sequence_Label_5y.json
 ```
 
-The public manifest records SHA-256 checksums, the 22,927-feature runtime contract, model targets, and delivery-validation AUROC values. Training records and patient-level predictions are private and are not included.
+The public manifest records SHA-256 checksums, the 22,927-feature runtime contract, model targets, and training-round metadata. Training records and patient-level predictions are private and are not included.
 
 These models are released for research and software demonstration only. They are not validated for clinical decision-making.

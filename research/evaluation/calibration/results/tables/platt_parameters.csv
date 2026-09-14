@@ -1,0 +1,7 @@
+Model,Horizon,Calibration_Patients,Calibration_Anchors,Calibration_Positive,Positive_Patients,Platt_Intercept,Platt_Slope
+XGBoost,1m,392,30087,174,20,-3.651716,0.951056
+XGBoost,1y,359,26532,504,20,-2.989749,0.755223
+XGBoost,5y,231,12287,509,19,-2.599235,0.544892
+CareNL-LLM,1m,392,30087,174,20,-3.278545,0.526802
+CareNL-LLM,1y,359,26532,504,20,-2.675381,0.428954
+CareNL-LLM,5y,231,12287,509,19,-2.454115,0.275827
