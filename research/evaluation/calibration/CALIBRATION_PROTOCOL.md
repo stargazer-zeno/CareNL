@@ -2,21 +2,19 @@
 
 ## Objective
 
-Assess post-hoc probability calibration for the fixed XGBoost and CareNL-LLM risk models at 1-month, 1-year, and 5-year horizons without retraining either model.
+Assess whether post-hoc probability calibration improves the probability scale of the fixed 300-tree XGBoost models at 1-month, 1-year, and 5-year horizons, without retraining the base models.
 
-## Fixed design
+## Design
 
-1. Sort the 1,181 test-set patient IDs lexicographically and permute them once with NumPy `default_rng(seed=42)`.
-2. Assign the first 392 patients to calibration and the remaining 789 patients to evaluation. Use the same patient assignment for both models and all horizons.
-3. Apply horizon-specific follow-up eligibility. The calibration/evaluation counts are 392/789 patients at 1 month, 359/710 at 1 year, and 231/452 at 5 years; the corresponding anchor and positive counts are recorded in `results/tables/calibration_split.csv`.
-4. Fit Platt scaling on the logit of clipped raw probabilities in the calibration subset. Fit isotonic regression as a sensitivity analysis.
-5. Apply the fitted mappings unchanged to the evaluation subset.
-6. Report AUROC, AUPRC, Brier score, calibration diagnostics, decision-curve summaries, paired Brier-score changes, and locked-threshold operating characteristics.
-7. Use patient-level cluster bootstrap resampling with seed `20260922`, 2,000 requested replicates, and at least 1,800 valid replicates for conditional estimates. The released paired Brier results contain 2,000 valid replicates.
+1. Build a patient-level table from the authorized source predictions and select a patient-disjoint calibration subset using stratification by outcome/follow-up pattern.
+2. Search candidate splits using a fixed seed and select the split with the lowest maximum standardized mean difference across supplied static features. The reported analysis used 5,000 candidates, 392 calibration patients, and at least 20 positive patients at each horizon.
+3. Fit Platt scaling on the logit of clipped source probabilities in the calibration subset. Fit isotonic regression only as a sensitivity analysis; do not serialize or distribute it.
+4. Apply the fitted mappings unchanged to predictions for the retained patients.
+5. Report AUROC, AUPRC, Brier score, calibration intercept/slope, ECE, binned calibration, decision-curve analysis, stage summaries, and patient-cluster bootstrap comparisons.
 
 ## Interpretation rules
 
-- Platt scaling is monotonic, so AUROC and AUPRC are unchanged apart from numerical precision.
-- Brier score and calibration diagnostics assess probability quality; they do not establish clinical utility by themselves.
-- Decision curves and locked thresholds are descriptive study outputs, not deployment recommendations.
-- The patient-disjoint evaluation is internal. External validation and local recalibration remain necessary before clinical use.
+- Platt scaling is monotonic, so AUROC and AUPRC should be unchanged apart from numerical precision.
+- Brier score and calibration summaries assess probability quality; they do not establish clinical utility by themselves.
+- Decision curves are descriptive study outputs. No threshold in this module is a deployment recommendation.
+- The patient-disjoint retained test is internal. External validation and local recalibration remain necessary before clinical use.

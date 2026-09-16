@@ -8,28 +8,28 @@
   ],
   "targets": {
     "1m": {
-      "intercept": -3.651716,
-      "slope": 0.951056,
-      "calibration_nodes": 30087,
+      "intercept": -3.535019532409656,
+      "slope": 1.044964698600527,
+      "calibration_nodes": 29693,
       "calibration_patients": 392,
-      "calibration_positive_nodes": 174,
-      "calibration_positive_patients": 20
+      "calibration_positive_nodes": 204,
+      "calibration_positive_patients": 21
     },
     "1y": {
-      "intercept": -2.989749,
-      "slope": 0.755223,
-      "calibration_nodes": 26532,
-      "calibration_patients": 359,
-      "calibration_positive_nodes": 504,
-      "calibration_positive_patients": 20
+      "intercept": -2.8670117882183286,
+      "slope": 0.7006804281309549,
+      "calibration_nodes": 25762,
+      "calibration_patients": 355,
+      "calibration_positive_nodes": 572,
+      "calibration_positive_patients": 22
     },
     "5y": {
-      "intercept": -2.599235,
-      "slope": 0.544892,
-      "calibration_nodes": 12287,
+      "intercept": -2.0244001782981718,
+      "slope": 0.8214084573585567,
+      "calibration_nodes": 11859,
       "calibration_patients": 231,
-      "calibration_positive_nodes": 509,
-      "calibration_positive_patients": 19
+      "calibration_positive_nodes": 777,
+      "calibration_positive_patients": 22
     }
   }
 }
