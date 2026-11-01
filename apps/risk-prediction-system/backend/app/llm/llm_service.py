@@ -28,7 +28,7 @@ ANSWER_PATTERN = re.compile(
     flags=re.DOTALL | re.IGNORECASE,
 )
 LABEL_KEYS = ("1m", "1y", "5y")
-VALID_TRENDS = ("恶化", "异常", "波动", "突发异常", "改善", "正常")
+VALID_TRENDS = ("worsening", "abnormal", "fluctuating", "sudden_abnormality", "improving", "normal", "恶化", "异常", "波动", "突发异常", "改善", "正常")
 
 
 def _clamp_prob(value: Any) -> float | None:
@@ -157,6 +157,10 @@ def parse_pattern_pairs(text: str) -> tuple[list[dict[str, str]], str, bool]:
 def validate_pattern_trends(pattern_pairs: list[dict[str, str]]) -> list[str]:
     warnings: list[str] = []
     for idx, pair in enumerate(pattern_pairs, start=1):
+        for feature in pair["pattern"].split("+"):
+            name = feature.split("@", 1)[0]
+            if name.count("(") != name.count(")") or name.count("[") != name.count("]"):
+                warnings.append(f"pattern_{idx} contains an unbalanced feature name")
         trend_tokens = re.findall(r"@([^+\s<]+)", pair["pattern"])
         invalid_trends = [trend for trend in trend_tokens if trend not in VALID_TRENDS]
         if invalid_trends:
@@ -187,6 +191,44 @@ def normalize_json_patterns(value: Any) -> list[dict[str, str]]:
     return patterns
 
 
+def repair_missing_answer_tag(text: str) -> str:
+    """Wrap one complete trailing probability object, without changing any values."""
+    if ANSWER_PATTERN.search(text):
+        return text
+    pairs = list(PAIR_PATTERN.finditer(text))
+    if not pairs:
+        return text
+    end = pairs[-1].end()
+    candidate = text[end:].strip()
+    if re.search(r"</?Answer\b", text[:end], flags=re.IGNORECASE):
+        return text
+    # Some serving templates stop immediately after the JSON, before </Answer>.
+    candidate = re.sub(r"^<Answer>\s*", "", candidate, count=1, flags=re.IGNORECASE)
+    candidate = re.sub(r"\s*</Answer>$", "", candidate, count=1, flags=re.IGNORECASE)
+
+    def unique_object(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("Duplicate probability key")
+            result[key] = value
+        return result
+
+    try:
+        payload = json.loads(candidate, object_pairs_hook=unique_object)
+    except (ValueError, TypeError):
+        return text
+    if not isinstance(payload, dict) or set(payload) != set(LABEL_KEYS):
+        return text
+    for value in payload.values():
+        if value is not None and (
+            type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+        ):
+            return text
+    LOGGER.info("Normalized missing Answer wrapper around a complete probability JSON object")
+    return text[:end] + "\n<Answer>" + candidate + "</Answer>"
+
+
 def parse_sft_pattern_response(raw_text: str | None) -> dict[str, Any]:
     if not isinstance(raw_text, str):
         return {
@@ -201,7 +243,7 @@ def parse_sft_pattern_response(raw_text: str | None) -> dict[str, Any]:
             "parse_warnings": ["empty or non-string response"],
         }
 
-    text = strip_thinking_and_code_fences(raw_text)
+    text = repair_missing_answer_tag(strip_thinking_and_code_fences(raw_text))
     probs, valid_fields, answer_text, has_answer_tag = parse_answer_probs(text)
     patterns, pattern_output, tags_balanced = parse_pattern_pairs(text)
     trend_warnings = validate_pattern_trends(patterns)
@@ -318,9 +360,13 @@ class LLMService:
             {
                 "role": "system",
                 "content": (
-                    "你是临床风险总结助手。仅根据提供的 Pattern、Analysis 和最终概率，"
-                    "用中文总结总体风险原因，不新增患者事实。严格返回 JSON 对象："
-                    '{"rationale":"..."}。'
+                    "You summarize clinical risk. Using only the supplied Pattern, Analysis and final probabilities, "
+                    "summarize the overall risk rationale in English only. Preserve temporal qualifications and uncertainty. "
+                    "Do not add patient facts or make normal-range, adherence, infection or complication claims. "
+                    "Check arithmetic directions: 21 to 45 increases; 178 to 13 decreases. "
+                    "The final probabilities describe all-cause mortality within each time horizon, NOT infection, liver-specific mortality or complications. "
+                    "Do not reinterpret these endpoints. Do not use Chinese text. "
+                    'Return strictly a JSON object: {"rationale":"..."}.'
                 ),
             },
             {
@@ -347,6 +393,40 @@ class LLMService:
                 f"rationale second pass failed; Pattern Analysis fallback used: {exc}",
             )
 
+    def _estimate_missing_horizons(self, messages, probabilities, valid_fields):
+        """Request one additional model estimate, never impute locally."""
+        missing = [key for key in LABEL_KEYS if probabilities.get(key) is None]
+        if not self.settings.retry_missing_probabilities or not missing:
+            return
+        properties = {key: {"type": ["number", "null"], "minimum": 0, "maximum": 1} for key in missing}
+        response_format = {"type": "json_schema", "json_schema": {
+            "name": "missing_mortality_estimates", "strict": True,
+            "schema": {"type": "object", "properties": properties,
+                       "required": missing, "additionalProperties": False}}}
+        request = (
+            "Using the same patient record, reconsider only these missing mortality horizons: "
+            + ", ".join(missing) + ". All horizons begin at the LAST recorded follow-up, not at transplantation. "
+            "An existing five-year history does not make the next five-year horizon inapplicable. "
+            "Future outcome observations are not required for a prospective prediction. "
+            "Return your model-estimated probability from 0 to 1 for each requested horizon, or null if you cannot support an estimate. "
+            "Do not copy another horizon, invent patient facts, or fill a number merely for visual completeness. "
+            "Return only the requested JSON probability keys. Existing predictions are: " + json.dumps(probabilities)
+        )
+        try:
+            raw = self.client.chat(messages + [{"role": "user", "content": request}],
+                                   max_tokens=256, response_format=response_format)
+            data = parse_llm_json(strip_thinking_and_code_fences(raw))
+            if not isinstance(data, dict) or set(data) != set(missing):
+                return
+            for key in missing:
+                value = data[key]
+                if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1:
+                    probabilities[key] = float(value)
+                    valid_fields[key] = True
+                    LOGGER.info("Accepted additional model estimate for missing horizon %s: %s", key, value)
+        except (LLMClientError, ValueError, TypeError) as exc:
+            LOGGER.warning("Missing-horizon estimation unsuccessful; keeping original null: %s", exc)
+
     def predict_one(
         self,
         patient: dict[str, Any],
@@ -372,6 +452,31 @@ class LLMService:
             }
 
         if self.settings.prompt_mode == "sft_pattern_prob":
+            # A single bounded format revision; never manufacture extra patterns locally.
+            initial = parse_sft_pattern_response(content)
+            oversized = any(len(pair["pattern"].split("+")) > 3 for pair in initial["patterns"])
+            if initial["parse_warnings"] or oversized:
+                instruction = (
+                    "Revise your previous response using the same patient record. Return only complete "
+                    "<Pattern>...</Pattern><Analysis>...</Analysis> pairs followed by <Answer>...</Answer>. "
+                    "Use 1-3 related features per pattern; split an overloaded pattern into distinct evidence-supported "
+                    "clinical groups, each with its own analysis. Never invent or duplicate findings to increase the count. "
+                    "Preserve the original Answer probabilities exactly. Copy complete feature names from the patient record "
+                    "(N(%) must not become N(). Use only worsening, abnormal, fluctuating, sudden_abnormality, improving, normal. "
+                    "Recheck increasing/decreasing statements against the actual numbers and avoid unsupported normal-range claims. "
+                    "Write in English only. Issues to fix: " + "; ".join(initial["parse_warnings"] + (["too many features in one pattern"] if oversized else []))
+                )
+                try:
+                    revised = self.client.chat(messages + [{"role": "assistant", "content": content}, {"role": "user", "content": instruction}])
+                    candidate = parse_sft_pattern_response(revised)
+                    if (candidate["parse_status"] == "ok"
+                        and candidate["pred_probs"] == initial["pred_probs"]
+                        and candidate["probability_fields_valid"] == initial["probability_fields_valid"]
+                        and all(len(pair["pattern"].split("+")) <= 3 for pair in candidate["patterns"])):
+                        content = revised
+                        LOGGER.info("Accepted one format revision for CareNL patterns")
+                except LLMClientError as exc:
+                    LOGGER.warning("Pattern format revision failed; preserving original result: %s", exc)
             guarded_content = content
             filter_metadata: dict[str, Any] = {
                 "enabled": self.settings.effective_pattern_guard_enabled,
@@ -396,6 +501,8 @@ class LLMService:
                 if parsed["parse_status"] == "ok":
                     parsed["parse_status"] = "format_warning"
             probabilities = dict(parsed["pred_probs"])
+            if parsed["patterns"]:
+                self._estimate_missing_horizons(messages, probabilities, parsed["probability_fields_valid"])
             invalid_fields = [
                 key
                 for key in LABEL_KEYS

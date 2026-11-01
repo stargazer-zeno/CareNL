@@ -9,3 +9,6 @@ backend/**/__pycache__/
 *.pyc
 *.log
 .git/
+
+artifacts/
+backend/app/ml/

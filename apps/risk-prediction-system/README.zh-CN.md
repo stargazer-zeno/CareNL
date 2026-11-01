@@ -2,47 +2,23 @@
 
 [English](README.md)
 
-该系统面向小儿肝移植术后随访死亡风险科研评估。用户上传标准化纵向记录后，系统分别输出未来 1 个月、1 年和 5 年的 XGBoost 与 LLM 风险概率。
+该系统面向小儿肝移植术后随访死亡风险科研评估。用户上传标准化纵向记录后，系统输出未来 1 个月、1 年和 5 年的 CareNL 风险概率。
 
 > 仅限科研与软件演示，不用于诊断、治疗、预后沟通或个体临床决策。
 
 ## 系统结构
 
-```text
-React/nginx -> FastAPI -> 输入适配器
-                         ├─ 内置 XGBoost 模型
-                         └─ 可选 OpenAI-compatible vLLM API
-```
+React/nginx → FastAPI → 输入适配器 → OpenAI-compatible LLM API。
 
-ML 与 LLM 结果始终独立展示，不进行加权或融合。LLM 某个时间点返回 `null` 时，API、页面和下载文件均保留 `null`，不会使用 ML 结果回填。
-
-## 机器学习模型
-
-后端镜像内置经过校验的 schema 和三个 XGBoost 模型。校验值和 22,927 维特征契约记录在 [`artifacts/model_manifest.json`](artifacts/model_manifest.json)。训练使用的私有病例及患者级预测结果不公开。
+CareNL 仅使用大模型输出 1 个月、1 年、5 年死亡风险、模式分析和总结，不再加载或调用 XGBoost。历史 ML 源码和模型文件保留在仓库，运行镜像不包含模型和 ML 专用依赖。显式 `null` 和部分结果保留，不补全概率。
 
 ## Docker 部署
 
-### ML-only 或连接外部 vLLM
+复制 `.env.example` 为 `.env`，配置 `LLM_BASE_URL`（包含 `/v1`）和与远程部署一致的 `LLM_MODEL_NAME`，然后运行 `docker compose up -d --build`。已有 `.env` 时保留原配置。
 
-```bash
-cp .env.example .env
-docker compose up -d --build
-```
+`LLM_BASE_URL` 留空时应用仍可启动，但预测不可用。`/health` 只检查应用存活，`/api/health` 同时报告远程连接和模型是否匹配。
 
-- 页面：<http://localhost:8080>
-- 后端：<http://localhost:8000>
-- API 文档：<http://localhost:8000/docs>
-
-接入外部 OpenAI-compatible 服务时设置：
-
-```dotenv
-LLM_BASE_URL=https://your-vllm-host.example/v1
-LLM_API_KEY=EMPTY
-LLM_MODEL_NAME=zeno156/PediLT-Risk-Qwen3-4B
-LLM_PROMPT_MODE=sft_pattern_prob
-```
-
-`LLM_BASE_URL` 留空即以 ML-only 模式运行。
+默认页面端口为 8080，API 端口为 8000；可通过 `FRONTEND_PORT` 和 `BACKEND_PORT` 覆盖。本机沿用页面 http://localhost:18080 和 API http://localhost:18000，文档位于 `/docs`。
 
 ### 可选本地 vLLM
 
@@ -73,3 +49,19 @@ npm ci
 npm test
 npm run build
 ```
+
+## 接口迁移与历史任务
+
+- `/api/predict`、`/api/batch_predict` 和异步任务接口保持原路径。预测对象为 `{id, llm}`，移除 `ml` 字段。
+- `/predict` 和 `/batch_predict` 停用并返回 HTTP 410，调用方应迁移至对应 `/api/` 路径。
+- JSON 仅含 LLM 结果，CSV 仅保留 `id` 和 `llm_` 列。历史任务原文件不修改，读取及下载时仅投影已有 LLM 结果。
+- `completed` 为已处理记录数，`failed` 统计错误、禁用或缺失结果；`partial` 为部分成功，不计入失败。任务完成不代表所有记录预测成功。
+- 应用测试不需要本地模型。历史模型测试仅在安装可选 XGBoost/scikit-learn 依赖后运行。
+
+## 英文展示样例与输出
+
+两个 `frontend/public/samples/` 样例已使用英文字段、取值及临床事件描述；数值和时序顺序保持不变。顶层字段为 `basic_information`、`followup_series`、`laboratory_series`、`medication_series` 和可选的 `clinical_events`。仍兼容旧中文输入字段，但同一部分不能同时提交中英文别名。
+
+预测及二次总结提示词均要求英文。趋势标签使用 `worsening`、`abnormal`、`fluctuating`、`sudden_abnormality`、`improving`、`normal`。输出标签及概率键保持不变。
+
+若模型仍生成中文，返回 `output_language_error` 英文错误提示，不展示或导出该文本作为有效预测。历史中文结果读取时也进行检查，原文件不变。模型是否能稳定生成英文，需要在远程服务部署后实测。

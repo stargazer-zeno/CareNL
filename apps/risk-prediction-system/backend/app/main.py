@@ -5,14 +5,13 @@ from typing import Any
 
 from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .adapters.standard_adapter import StandardDataAdapter, StandardDataAdapterError
 from .aggregator import PredictionAggregator
 from .config import get_settings
 from .jobs.store import JobStore
 from .llm.llm_service import LLMService
-from .ml.ml_service import MLService
 from .schemas import BatchPredictionResponse, HealthResponse, PredictionResult
 
 logging.basicConfig(
@@ -27,7 +26,7 @@ app = FastAPI(
     version="1.0.0",
     description=(
         "Browser-facing gateway that standardizes follow-up data and returns "
-        "XGBoost (ML) and remote LLM mortality risk for 1 month / 1 year / 5 years."
+        "CareNL mortality risk for 1 month / 1 year / 5 years."
     ),
 )
 
@@ -39,43 +38,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ml_service = MLService(settings.ml)
 llm_service = LLMService(settings.llm)
-aggregator = PredictionAggregator(ml_service, llm_service)
+aggregator = PredictionAggregator(llm_service)
 adapter = StandardDataAdapter()
 job_store = JobStore(settings.jobs_dir, max_workers=settings.job_workers)
 
 
-# ---------------------------------------------------- compatibility XGBoost API
+# Legacy model endpoints are retired; liveness is independent of remote inference.
 @app.get("/health")
-def compatibility_health() -> dict[str, str]:
-    """Compatible with the original XGBoost-only service health check."""
-    if not ml_service.available:
-        raise HTTPException(status_code=503, detail="XGBoost model unavailable.")
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/predict")
-def compatibility_predict(payload: dict[str, Any]) -> dict[str, Any]:
-    """Compatible single-patient XGBoost prediction (ML only)."""
-    result = ml_service.predict_one(payload)
-    if result["status"] == "unavailable":
-        raise HTTPException(status_code=503, detail=result.get("error"))
-    if result["status"] == "error":
-        raise HTTPException(status_code=400, detail=result.get("error"))
-    return {k: v for k, v in result.items() if k.startswith("death_probability")}
+def retired_predict():
+    raise HTTPException(status_code=410, detail="This XGBoost endpoint is retired. Use /api/predict for CareNL LLM predictions.")
 
 
 @app.post("/batch_predict")
-def compatibility_batch_predict(payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Compatible batch XGBoost prediction (ML only)."""
-    results = ml_service.predict_batch(payload)
-    if results and results[0]["status"] == "unavailable":
-        raise HTTPException(status_code=503, detail=results[0].get("error"))
-    return [
-        {k: v for k, v in r.items() if k.startswith("death_probability")}
-        for r in results
-    ]
+def retired_batch_predict():
+    raise HTTPException(status_code=410, detail="This XGBoost endpoint is retired. Use /api/batch_predict for CareNL LLM predictions.")
 
 
 # ------------------------------------------------------------------- new API
@@ -84,7 +66,6 @@ def api_health() -> dict[str, Any]:
     return {
         "status": "ok",
         "backend": "ok",
-        "ml": ml_service.health(),
         "llm": llm_service.health(),
     }
 
@@ -170,20 +151,14 @@ def download_job(job_id: str, format: str = Query("csv", pattern="^(csv|json)$")
     meta = job_store.get_status(job_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="Job not found.")
+    results = job_store.get_results(job_id)
+    if results is None:
+        raise HTTPException(status_code=409, detail=f"Results not ready. Current status: {meta.get('status')}.")
+    headers = {"Content-Disposition": f'attachment; filename="{job_id}_results.{format}"'}
     if format == "csv":
-        path = job_store.get_csv_path(job_id)
-        media_type = "text/csv"
-    else:
-        path = job_store.get_json_path(job_id)
-        media_type = "application/json"
-    if path is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Results not ready. Current status: {meta.get('status')}.",
-        )
-    return FileResponse(
-        path, media_type=media_type, filename=f"{job_id}_results.{format}"
-    )
+        return Response(content="\ufeff" + job_store.results_to_csv_string(results), media_type="text/csv", headers=headers)
+    return JSONResponse(content=results, headers=headers)
+
 
 
 @app.exception_handler(StandardDataAdapterError)

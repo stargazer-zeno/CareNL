@@ -98,6 +98,9 @@ class LLMSettings:
     rationale_second_pass: bool = field(
         default_factory=lambda: _bool_env("LLM_RATIONALE_SECOND_PASS", True)
     )
+    retry_missing_probabilities: bool = field(
+        default_factory=lambda: _bool_env("LLM_RETRY_MISSING_PROBABILITIES", False)
+    )
     rationale_max_tokens: int = field(
         default_factory=lambda: int(
             os.environ.get("LLM_RATIONALE_MAX_TOKENS", "768")
@@ -118,7 +121,6 @@ class LLMSettings:
 
 @dataclass
 class Settings:
-    ml: MLSettings = field(default_factory=lambda: MLSettings().resolved())
     llm: LLMSettings = field(default_factory=LLMSettings)
 
     jobs_dir: str = field(

@@ -124,26 +124,23 @@ class LLMClient:
         raise LLMClientError(f"LLM request failed after retries: {last_error}")
 
     def ping(self) -> dict[str, Any]:
-        """Lightweight reachability check against the models endpoint."""
+        """Check HTTP success and that the configured model is actually served."""
         if not self.enabled:
-            return {"reachable": False, "reason": "not configured"}
+            return {"reachable": False, "ready": False, "reason": "not configured"}
         try:
             with httpx.Client(timeout=min(self.settings.timeout_seconds, 10)) as client:
-                resp = client.get(
-                    self._models_endpoint(),
-                    headers=self._headers(),
-                )
-                info: dict[str, Any] = {
-                    "reachable": resp.status_code < 500,
-                    "status_code": resp.status_code,
-                }
-                if resp.is_success:
-                    try:
-                        model_name = self.settings.model_name or self._resolve_model_name()
-                    except LLMClientError:
-                        model_name = None
-                    if model_name:
-                        info["model_name"] = model_name
-                return info
-        except httpx.HTTPError as exc:
-            return {"reachable": False, "reason": str(exc)}
+                resp = client.get(self._models_endpoint(), headers=self._headers())
+                info = {"reachable": resp.is_success, "ready": False, "status_code": resp.status_code}
+                if not resp.is_success:
+                    return {**info, "reason": f"Model endpoint returned HTTP {resp.status_code}"}
+                data = resp.json()
+                models = data.get("data", []) if isinstance(data, dict) else []
+                ids = [item.get("id") for item in models if isinstance(item, dict) and item.get("id")] if isinstance(models, list) else []
+                model = self.settings.model_name or (ids[0] if ids else None)
+                matched = bool(model and model in ids)
+                if matched:
+                    self._model_name_cache = model
+                return {**info, "model_name": model, "model_available": matched, "ready": matched,
+                        "reason": None if matched else "Configured model is not available on the server"}
+        except (httpx.HTTPError, ValueError) as exc:
+            return {"reachable": False, "ready": False, "reason": str(exc)}

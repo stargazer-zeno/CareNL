@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..aggregator import flatten_for_csv
+from ..llm.output_language import english_result
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,11 +23,6 @@ STATUS_FAILED = "failed"
 
 CSV_COLUMNS = [
     "id",
-    "ml_status",
-    "ml_death_probability_1m",
-    "ml_death_probability_1y",
-    "ml_death_probability_5y",
-    "ml_error",
     "llm_status",
     "llm_death_probability_1m",
     "llm_death_probability_1y",
@@ -122,8 +118,7 @@ class JobStore:
             failed = sum(
                 1
                 for r in results
-                if (r.get("ml", {}).get("status") not in {"ok"})
-                and (r.get("llm", {}).get("status") not in {"ok", "disabled"})
+                if r.get("llm", {}).get("status") not in {"ok", "partial"}
             )
             meta.update(
                 status=STATUS_COMPLETED,
@@ -157,7 +152,8 @@ class JobStore:
         path = self._job_dir(job_id) / "results.json"
         if not path.exists():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        return [{"id": item.get("id"), "llm": english_result(item.get("llm") or {"status": "error", "error": "No CareNL result in this historical record."})}
+                for item in json.loads(path.read_text(encoding="utf-8"))]
 
     def get_csv_path(self, job_id: str) -> Path | None:
         path = self._job_dir(job_id) / "results.csv"

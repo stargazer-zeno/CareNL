@@ -5,8 +5,8 @@ import json
 from typing import Any
 
 # Fields that directly leak the mortality outcome must never reach the LLM.
-LEAKAGE_TOP_LEVEL = {"真实标签"}
-LEAKAGE_BASE_FIELDS = {"是否死亡", "死亡时间", "死亡原因"}
+LEAKAGE_TOP_LEVEL = {"真实标签", "true_labels", "outcome_labels", "labels"}
+LEAKAGE_BASE_FIELDS = {"是否死亡", "死亡时间", "死亡原因", "is_deceased", "death_time", "cause_of_death", "death_date", "mortality_outcome"}
 CLINICAL_EVENTS_FIELD = "临床事件"
 EVENT_LEAKAGE_TERMS = (
     "死亡",
@@ -22,43 +22,45 @@ EVENT_LEAKAGE_TERMS = (
     "death",
 )
 
-SYSTEM_PROMPT = (
-    "你是一名资深的小儿肝移植随访临床专家。你的任务是根据患儿的术前基础信息、"
-    "术后随访的时序检验指标、时序用药记录与历史临床事件，评估该患儿在当前随访时间点之后"
-    "未来 1 个月、1 年、5 年内的死亡风险概率。\n"
-    "请只依据所提供的客观临床数据进行推断，不要臆造未给出的信息。\n"
-    "输出必须是严格的 JSON 对象，不要包含任何额外文字、解释或 Markdown 代码块标记，"
-    "格式如下：\n"
-    '{"death_probability_1m": <0-1之间的小数>, '
-    '"death_probability_1y": <0-1之间的小数>, '
-    '"death_probability_5y": <0-1之间的小数>, '
-    '"rationale": "<简要中文临床推理，不超过100字>"}'
-)
+SYSTEM_PROMPT = """You are an experienced pediatric liver transplant follow-up specialist.
+Using only the supplied baseline information, longitudinal laboratory results, medications and historical clinical events, estimate mortality risk within 1 month, 1 year and 5 years AFTER the latest follow-up time point.
+Do not invent patient facts. Write all narrative content in English only, including feature names, analyses and rationale. Do not output Chinese characters.
+Return only a strict JSON object, without Markdown or additional commentary:
+{"death_probability_1m": <probability from 0 to 1 or null>, "death_probability_1y": <probability from 0 to 1 or null>, "death_probability_5y": <probability from 0 to 1 or null>, "rationale": "<brief English clinical rationale, at most 100 words>"}
+Use null when a probability cannot be estimated; do not invent a value."""
 
-SFT_SYSTEM_PROMPT = "You are a helpful assistant."
+SFT_SYSTEM_PROMPT = "You are a helpful assistant. Respond in English only. Do not output Chinese characters."
 
-SFT_USER_PREFIX_TEMPLATE = """你是一位有丰富经验的小儿肝移植医生。
+SFT_USER_PREFIX_TEMPLATE = """You are an experienced pediatric liver transplant physician.
 
-### 【任务说明】
-请基于以下患者截至最后一次随访时点的全部历史资料，先总结该患者截至最后一次随访时点的关键临床模式，再对其后续1个月、1年及5年内发生死亡事件的风险进行前瞻性预测，给出对应的死亡风险预测概率值。
+### Task
+Use the complete patient history up to the latest follow-up time point. First identify the key clinical patterns observed up to that point, then prospectively estimate mortality risk over the NEXT 1 month, 1 year and 5 years. Use only the supplied facts.
+All three horizons start at the LAST recorded follow-up, not at transplantation. A record that already spans five years still requires a prospective five-year estimate from its last observation. Absence of future observed outcomes is expected in prediction and is not, by itself, a reason to return null. Provide a model-estimated number for each horizon when supported; use null only when you cannot make a supportable estimate.
 --------------------------------------------------
 {SUMMARY_TEXT}
-【患者病历数据】"""
+### Patient record"""
 
-SFT_OUTPUT_INSTRUCTIONS = """### 【输出指令】
-请只输出以下标签拼接格式，不要输出任何格式之外的说明文字。
-
-输出要求如下：
-1. 先按临床模式逐组输出，每组包含：
-   - `<Pattern>特征a@趋势x + 特征b@趋势y</Pattern>`
-   - `<Analysis>对该模式的医学分析</Analysis>`
-2. `pattern` 中允许使用的趋势仅限：`恶化`、`异常`、`波动`、`突发异常`、`改善`、`正常`
-3. 所有临床模式输出完成后，追加死亡风险预测概率，格式为：
-   `<Answer> {"1m": <未来 1 个月内发生死亡的概率>, "1y": <未来 1 年内发生死亡的概率>, "5y": <未来 5 年内发生死亡的概率>}</Answer>`
-4. 概率取值必须是 0.0-1.0 之间的浮点数；数值 > 0.5 表示预测该时间窗口内死亡风险较高，数值 < 0.5 表示预测该时间窗口内存活概率更高
-
-输出格式示例：
-<Pattern>特征a@趋势x + 特征b@趋势y</Pattern> <Analysis>对该模式的医学分析</Analysis><Pattern>特征c@趋势z</Pattern> <Analysis>对该模式的医学分析</Analysis> <Answer> {"1m": 0.1234, "1y": 0.2345, "5y": 0.3456}</Answer>"""
+SFT_OUTPUT_INSTRUCTIONS = """### Output instructions
+Write exclusively in English. Use English feature names, English trend labels and English analyses. Do not include Chinese text or Markdown.
+Return only the following sequence of tags:
+1. For each clinical pattern, output:
+   <Pattern>feature_a@trend_x + feature_b@trend_y</Pattern>
+   <Analysis>English clinical analysis of this pattern</Analysis>
+2. Allowed trend labels are exactly: worsening, abnormal, fluctuating, sudden_abnormality, improving, normal.
+3. Base dynamic patterns on longitudinal observations. Do not describe static baseline fields such as sex, blood group, transplant type or diagnosis as fluctuating laboratory measurements.
+4. After all patterns, append:
+   <Answer>{"1m": <probability>, "1y": <probability>, "5y": <probability>}</Answer>
+   Each probability is a number from 0.0 to 1.0, or null if it cannot be estimated. Do not invent missing probabilities.
+5. A probability above 0.5 indicates greater predicted mortality risk than survival for that horizon; below 0.5 indicates greater predicted survival probability.
+6. For a rich longitudinal record, aim for 4-6 DISTINCT evidence-supported patterns, each in its own <Pattern>/<Analysis> pair. Use fewer only when the record genuinely lacks evidence. Never pad or duplicate patterns to meet a count.
+7. Each pattern should contain only 1-3 closely related features. Do not merge all laboratory markers into one pattern. Review separate domains when supported: hepatocellular injury (ALT/AST), cholestasis (TB/DB/GGT), synthetic/coagulation function (ALB/INR/PT), blood counts, renal observations, and medication exposure. Select the domains supported by this patient's actual data, not a fixed checklist.
+8. Each Analysis must cite at least two supplied numeric observations and their postoperative days where aligned time points are available. Distinguish early recovery, any later transient changes, and the latest follow-up state. Do not call every series improving or claim monotonic improvement when intermediate reversals exist.
+9. Copy feature names exactly from the record, including punctuation: for example N(%)@fluctuating, not N(@fluctuating). Keep brackets and parentheses inside the feature name, before @. Trend labels must match the allowed labels exactly, with no trailing punctuation.
+10. Do not infer normal ranges, units, adherence, absence of infection, or absence of complications from laboratory trends alone. Use documented clinical events for such claims; otherwise describe only observed numerical trajectories. Missing values are not normal values.
+Format example (illustrative placeholders, not patient findings):
+<Pattern>feature_a@worsening + feature_b@abnormal</Pattern><Analysis>English explanation based on the supplied observations.</Analysis><Answer>{"1m": p_1m, "1y": p_1y, "5y": p_5y}</Answer>
+Here p_1m, p_1y and p_5y are placeholders: replace them with your independently estimated numeric probabilities or null. Never copy illustrative values.
+"""
 
 def _event_contains_leakage(event: Any) -> bool:
     if isinstance(event, str):
@@ -95,17 +97,18 @@ def sanitize_patient(patient: dict[str, Any]) -> dict[str, Any]:
     cleaned = copy.deepcopy(patient)
     for key in LEAKAGE_TOP_LEVEL:
         cleaned.pop(key, None)
-    base = cleaned.get("基础信息")
-    if isinstance(base, dict):
-        for field in LEAKAGE_BASE_FIELDS:
-            base.pop(field, None)
-
-    if CLINICAL_EVENTS_FIELD in cleaned:
-        safe_events = _sanitize_clinical_events(cleaned[CLINICAL_EVENTS_FIELD])
-        if safe_events is None:
-            cleaned.pop(CLINICAL_EVENTS_FIELD, None)
-        else:
-            cleaned[CLINICAL_EVENTS_FIELD] = safe_events
+    for section in ("基础信息", "basic_information"):
+        base = cleaned.get(section)
+        if isinstance(base, dict):
+            for field in LEAKAGE_BASE_FIELDS:
+                base.pop(field, None)
+    for section in (CLINICAL_EVENTS_FIELD, "clinical_events"):
+        if section in cleaned:
+            safe_events = _sanitize_clinical_events(cleaned[section])
+            if safe_events is None:
+                cleaned.pop(section, None)
+            else:
+                cleaned[section] = safe_events
     return cleaned
 
 
@@ -117,47 +120,21 @@ def _section_count(patient: dict[str, Any], section: str) -> int:
 def build_summary_text(patient: dict[str, Any]) -> str:
     """Create a deterministic brief summary for the SFT evaluation prompt."""
     cleaned = sanitize_patient(patient)
-    base = cleaned.get("基础信息") or {}
+    base = cleaned.get("basic_information", cleaned.get("基础信息", {})) or {}
     if not isinstance(base, dict):
         base = {}
+    base_parts = [f"{key}: {value}" for key, value in list(base.items())[:16] if str(value).strip()]
+    counts = []
+    for english, legacy in (("followup_series", "时序随访基础信息"),
+                            ("laboratory_series", "时序检验指标 (纯数值序列)"),
+                            ("medication_series", "时序用药记录 (纯数值序列)"),
+                            ("clinical_events", CLINICAL_EVENTS_FIELD)):
+        section = english if english in cleaned else legacy
+        counts.append(f"{english}: {_section_count(cleaned, section)}")
+    return (f"Patient ID: {cleaned.get('id', 'unknown')}\n"
+            f"Baseline summary: {'; '.join(base_parts) if base_parts else 'Not provided'}\n"
+            f"Longitudinal record summary: {'; '.join(counts)}")
 
-    preferred_fields = [
-        "患儿性别",
-        "手术年龄",
-        "患儿术时体重",
-        "术式",
-        "ABO血型相容性",
-        "主要诊断分类",
-        "诊断1",
-        "诊断2",
-        "诊断3",
-        "供体性别",
-        "供体年龄",
-        "GRWR",
-    ]
-    base_parts = [
-        f"{field}: {base[field]}"
-        for field in preferred_fields
-        if field in base and str(base[field]).strip()
-    ]
-    if not base_parts:
-        base_parts = [
-            f"{key}: {value}"
-            for key, value in list(base.items())[:12]
-            if str(value).strip()
-        ]
-
-    counts = (
-        f"随访基础信息{_section_count(cleaned, '时序随访基础信息')}项，"
-        f"检验指标{_section_count(cleaned, '时序检验指标 (纯数值序列)')}项，"
-        f"用药记录{_section_count(cleaned, '时序用药记录 (纯数值序列)')}项，"
-        f"临床事件{_section_count(cleaned, CLINICAL_EVENTS_FIELD)}项。"
-    )
-    return (
-        f"患者ID: {cleaned.get('id', 'unknown')}\n"
-        f"基础信息摘要: {'；'.join(base_parts) if base_parts else '未提供'}\n"
-        f"时序资料摘要: {counts}"
-    )
 
 
 class LLMPromptBuilder:
@@ -168,10 +145,10 @@ class LLMPromptBuilder:
         cleaned = sanitize_patient(patient)
         body = json.dumps(cleaned, ensure_ascii=False, indent=2)
         return (
-            "以下是一名患儿截至当前随访时间点的临床数据（已移除任何结局标签）：\n\n"
+            "Patient data through the latest follow-up (outcome labels removed):\n\n"
             f"{body}\n\n"
-            "请评估该患儿在当前随访点之后未来 1 个月、1 年、5 年内的死亡风险概率，"
-            "并严格按系统指令的 JSON 格式输出。"
+            "Estimate mortality risk over the next 1 month, 1 year and 5 years. "
+            "Return strict JSON as specified in the system instructions, with all narrative content in English."
         )
 
     def build_messages(self, patient: dict[str, Any]) -> list[dict[str, str]]:

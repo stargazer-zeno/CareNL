@@ -84,14 +84,14 @@ def test_sft_prompt_messages_structure_and_sanitization():
         "临床事件": ["术后第7天：超声提示血流通畅。", "术后第30天：患儿病故。"],
     }
     msgs = SFTPatternPromptBuilder().build_messages(patient)
-    assert msgs[0]["content"] == "You are a helpful assistant."
+    assert "Respond in English only" in msgs[0]["content"]
     assert "<Pattern>" in msgs[1]["content"]
     assert "<Answer>" in msgs[1]["content"]
     assert "真实标签" not in msgs[1]["content"]
     assert "是否死亡" not in msgs[1]["content"]
     assert "超声提示血流通畅" in msgs[1]["content"]
     assert "患儿病故" not in msgs[1]["content"]
-    assert "临床事件1项" in msgs[1]["content"]
+    assert "clinical_events: 1" in msgs[1]["content"]
 
 
 def test_generic_prompt_keeps_only_safe_clinical_events():

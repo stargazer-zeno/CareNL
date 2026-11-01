@@ -17,7 +17,6 @@ export default function App() {
   const [healthError, setHealthError] = useState("");
 
   const [jsonText, setJsonText] = useState("");
-  const [singleNotice, setSingleNotice] = useState("");
   const [singleResult, setSingleResult] = useState(null);
   const [singleError, setSingleError] = useState("");
   const [singleBusy, setSingleBusy] = useState(false);
@@ -44,13 +43,11 @@ export default function App() {
 
   async function handleSingle() {
     if (!jsonText.trim()) {
-      setSingleNotice("");
       setSingleError('Paste a standard patient JSON record or select "Load sample".');
       jsonInputRef.current?.focus();
       return;
     }
     setSingleBusy(true);
-    setSingleNotice("");
     setSingleError("");
     setSingleResult(null);
     try {
@@ -65,7 +62,6 @@ export default function App() {
   }
 
   async function handleLoadSample() {
-    setSingleNotice("");
     setSingleError("");
     try {
       const response = await fetch(SAMPLE_URL, { cache: "no-store" });
@@ -79,9 +75,6 @@ export default function App() {
       return;
     }
     setSingleResult(null);
-    setSingleNotice(
-      "The synthetic long-term follow-up sample is ready. It is provided only to demonstrate longitudinal processing and the model pipeline, and can be submitted directly."
-    );
     requestAnimationFrame(() => {
       jsonInputRef.current?.focus();
       jsonInputRef.current?.setSelectionRange(0, 0);
@@ -92,7 +85,6 @@ export default function App() {
     setJsonText("");
     setSingleResult(null);
     setSingleError("");
-    setSingleNotice("");
     jsonInputRef.current?.focus();
   }
 
@@ -141,21 +133,22 @@ export default function App() {
     <div className="app">
       <header className="hero">
         <div className="hero-copy">
-          <div className="eyebrow">PEDIATRIC LIVER TRANSPLANT · RESEARCH DEMO</div>
-          <h1>CareNL: Care New Liver, Care New Life</h1>
+          <div className="eyebrow">PEDIATRIC LIVER TRANSPLANT · RISK PREDICTION SYSTEM</div>
+          <h1>CareNL</h1>
+          <p className="brand-tagline">Care New Liver, Care New Life</p>
           <p className="subtitle">
-            Independent XGBoost and clinical LLM estimates for 1-month, 1-year, and
-            5-year mortality risk.
+            Predict post-transplant mortality risk from longitudinal patient records with interpretable pattern analysis.
           </p>
           <div className="hero-tags">
-            <span>Parallel model estimates</span>
-            <span>Clinical pattern analysis</span>
-            <span>Batch prediction</span>
+            <span>Longitudinal risk prediction</span>
+            <span>Interpretable patterns</span>
+            <span>Batch assessment</span>
           </div>
         </div>
-        <div className="hero-mark" aria-hidden="true">
-          <span>AI</span>
-          <small>Risk Assistant</small>
+        <div className="hero-horizons" aria-label="Prediction horizons">
+          <span className="horizon-label">Prediction horizons</span>
+          <div className="horizon-times"><span><strong>1</strong>Month</span><span><strong>1</strong>Year</span><span><strong>5</strong>Years</span></div>
+          <p>Post-transplant mortality risk</p>
         </div>
       </header>
 
@@ -167,7 +160,7 @@ export default function App() {
             <div className="section-number">01</div>
             <div>
               <h2>Single-Patient Prediction</h2>
-              <p>Paste one standard patient JSON record to run the ML and LLM pipelines independently.</p>
+              <p>Paste one standard patient JSON record to generate a CareNL prediction.</p>
             </div>
           </div>
 
@@ -184,7 +177,6 @@ export default function App() {
               value={jsonText}
               onChange={(e) => {
                 setJsonText(e.target.value);
-                setSingleNotice("");
               }}
               rows={12}
               spellCheck={false}
@@ -211,16 +203,15 @@ export default function App() {
               </button>
             )}
           </div>
-          {singleNotice && <p className="notice success-notice">{singleNotice}</p>}
           {singleError && <p className="notice error-notice">{singleError}</p>}
 
           {singleResult && (
             <div className="result-section">
               <div className="result-heading">
-                <span>Prediction Results</span>
-                <small>ML and LLM outputs are reported independently without weighted fusion</small>
+                <span>CareNL Prediction</span>
+                <small>Mortality risk and interpretable pattern analysis</small>
               </div>
-              <ResultsTable results={singleRows} />
+              <ResultsTable results={singleRows} single />
             </div>
           )}
         </section>
@@ -307,7 +298,7 @@ export default function App() {
           {batchResults && (
             <div className="result-section">
               <div className="result-heading">
-                <span>Batch Prediction Results</span>
+                <span>CareNL Batch Predictions</span>
                 <small>{batchResults.length} records</small>
               </div>
               <ResultsTable results={batchResults} />

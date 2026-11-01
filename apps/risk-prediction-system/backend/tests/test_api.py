@@ -19,42 +19,26 @@ SAMPLE = {
 }
 
 
-def test_api_health_reports_branches():
+def test_api_health_reports_carenl():
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    body = resp.json()
-    assert "ml" in body and "llm" in body
-    assert "available" in body["ml"]
-    assert body["ml"]["available"] is True
-    assert body["ml"]["expected_feature_count"] == 22_927
-    assert "enabled" in body["llm"]
+    assert "ml" not in resp.json()
+    assert "enabled" in resp.json()["llm"]
+    assert client.get("/health").json() == {"status": "ok"}
 
 
-def test_api_predict_returns_both_branches():
-    resp = client.post("/api/predict", json=SAMPLE)
-    assert resp.status_code == 200
-    body = resp.json()
+def test_api_predict_returns_only_llm():
+    body = client.post("/api/predict", json=SAMPLE).json()
+    assert set(body) == {"id", "llm"}
     assert body["id"] == "node_1"
-    assert "status" in body["ml"]
-    assert "status" in body["llm"]
-    assert body["ml"]["status"] == "ok"
-    ml_probabilities = {
-        key: body["ml"][key]
-        for key in ("death_probability_1m", "death_probability_1y", "death_probability_5y")
-    }
-    for probability in ml_probabilities.values():
-        assert 0.0 <= probability <= 1.0
-    # LLM is not configured in tests -> disabled
     assert body["llm"]["status"] == "disabled"
-    for hidden_field in (
-        "native_probabilities",
-        "probability_sources",
-        "fallback_fields",
-        "native_parse_status",
-        "answer_text",
-        "raw_response",
-    ):
-        assert hidden_field not in body["llm"]
+
+
+def test_legacy_prediction_endpoints_retired():
+    for path in ["/predict", "/batch_predict"]:
+        response = client.post(path, json=SAMPLE)
+        assert response.status_code == 410
+        assert "/api/" in response.json()["detail"]
 
 
 def test_api_batch_predict():
@@ -122,7 +106,7 @@ def test_job_lifecycle_json_upload():
 
     csv_resp = client.get(f"/api/jobs/{job_id}/download?format=csv")
     assert csv_resp.status_code == 200
-    assert "ml_status" in csv_resp.text
+    assert "ml_status" not in csv_resp.text.replace("llm_status", "")
     assert "llm_status" in csv_resp.text
     assert "llm_rationale_source" in csv_resp.text
     assert "llm_native_probability_1m" not in csv_resp.text

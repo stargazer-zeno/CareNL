@@ -7,21 +7,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# System deps for xgboost (libgomp) etc.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
-COPY artifacts /artifacts
 
-# The validated schema and XGBoost models are bundled in the image.
-ENV SCHEMA_PATH=/artifacts/datasets/schema.json \
-    MODEL_DIR=/artifacts/xgboost \
-    JOBS_DIR=/data/jobs
+ENV JOBS_DIR=/data/jobs
 
 EXPOSE 8000
 

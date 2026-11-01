@@ -193,6 +193,17 @@ class StandardDataAdapter:
 
     # --------------------------------------------------------------- helpers
     def _ensure_sections(self, obj: dict[str, Any]) -> dict[str, Any]:
+        if any(key in obj for key in ("basic_information", "followup_series", "laboratory_series", "medication_series", "clinical_events")):
+            obj = dict(obj)
+            for english, legacy, default in (
+                ("basic_information", SECTION_BASE, {}), ("followup_series", SECTION_FOLLOWUP, []),
+                ("laboratory_series", SECTION_LAB, []), ("medication_series", SECTION_MED, []),
+                ("clinical_events", "临床事件", []),
+            ):
+                if legacy in obj and english in obj:
+                    raise StandardDataAdapterError(f"Duplicate section: use only {english}.")
+                obj.setdefault(english, obj.pop(legacy, default))
+            return obj
         obj.setdefault(SECTION_BASE, {})
         obj.setdefault(SECTION_FOLLOWUP, [])
         obj.setdefault(SECTION_LAB, [])

@@ -26,7 +26,7 @@ test("CareNL branding and English document metadata are present", () => {
   const app = read("../src/App.jsx");
   const html = read("../index.html");
 
-  assert.match(app, /CareNL: Care New Liver, Care New Life/);
+  assert.match(app, /<h1>CareNL<\/h1>/);
   assert.match(html, /<html lang="en">/);
   assert.match(html, /<title>CareNL \| Pediatric Liver Transplant Risk Prediction<\/title>/);
 });

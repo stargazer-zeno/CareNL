@@ -279,6 +279,13 @@ def contains_any(text: str, keywords: Iterable[str]) -> bool:
 
 
 def is_basic_info_entity(entity: str) -> bool:
+    normalized = entity.lower().replace("_", " ")
+    english_baseline = ("recipient sex", "donor sex", "recipient blood group", "donor blood group",
+                        "blood type", "blood group", "sex", "gender", "age at transplant", "donor age",
+                        "recipient age", "graft weight", "weight at transplant", "transplant type",
+                        "surgical history", "diagnosis", "biliary atresia", "kasai", "abo", "grwr", "cyp")
+    if any(re.search(r"\b" + re.escape(term) + r"\b", normalized) for term in english_baseline):
+        return True
     if contains_any(entity, DYNAMIC_ENTITY_ALLOWLIST_KEYWORDS):
         return False
     if FOLLOWUP_TIME_RE.search(entity):
@@ -415,7 +422,7 @@ def correct_pattern_text(pattern_text: str) -> Tuple[str, Tuple[PatternCorrectio
 def split_sentences(text: str) -> List[str]:
     if not text:
         return []
-    parts = re.split(r"(?<=[。！？!?])", text)
+    parts = re.split(r"(?<=[。！？!?])|(?<=\.)\s+", text)
     return [part for part in parts if part]
 
 
@@ -459,6 +466,8 @@ def clean_analysis_text(
         return cleaned, rewrite_count
 
     kept_label = correction_entity_label(kept_entities)
+    if not re.search(r"[㐀-鿿]", analysis_text + kept_pattern_text):
+        return "Retained longitudinal features: " + ", ".join(kept_entities) + ". Baseline descriptors were removed from this pattern.", rewrite_count
     fallback = f"保留的检验/用药动态指标为{kept_label}；基础信息已从Pattern与分析中移除。"
     return fallback, rewrite_count
 
@@ -617,6 +626,8 @@ def correct_model_output(text: str) -> CorrectionResult:
 
     removals = tuple(all_removals)
     corrected, placeholder_inserted = add_placeholder_if_needed(corrected, len(removals))
+    if placeholder_inserted and not re.search(r"[㐀-鿿]", text):
+        corrected = corrected.replace(PLACEHOLDER_PAIR, "<Pattern>No retained dynamic features</Pattern>\n<Analysis>No eligible longitudinal laboratory or medication patterns remained after baseline filtering.</Analysis>")
     corrections = tuple(
         PatternCorrection(
             entity=item.entity,

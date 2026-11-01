@@ -5,14 +5,6 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 
-class MLResult(BaseModel):
-    status: str = Field(description="ok | error | unavailable")
-    death_probability_1m: Optional[float] = None
-    death_probability_1y: Optional[float] = None
-    death_probability_5y: Optional[float] = None
-    error: Optional[str] = None
-
-
 class LLMResult(BaseModel):
     status: str = Field(description="ok | partial | error | disabled")
     death_probability_1m: Optional[float] = None
@@ -31,7 +23,6 @@ class LLMResult(BaseModel):
 
 class PredictionResult(BaseModel):
     id: Optional[str] = None
-    ml: MLResult
     llm: LLMResult
 
 
@@ -43,7 +34,6 @@ class BatchPredictionResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     backend: str
-    ml: dict[str, Any]
     llm: dict[str, Any]
 
 

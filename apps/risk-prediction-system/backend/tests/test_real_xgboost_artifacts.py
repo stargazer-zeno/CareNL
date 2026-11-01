@@ -8,6 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytest.importorskip("xgboost", reason="Archived ML validation requires optional XGBoost dependencies")
+pytest.importorskip("sklearn")
+
 from app.ml.feature_pipeline import FeaturePipeline
 from app.ml.predictor import (
     EXPECTED_BOOSTED_ROUNDS,
